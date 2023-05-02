@@ -17,6 +17,7 @@ from hurry.filesize import size
 from asyncio import get_running_loop
 from pyrogram import Client, filters
 from megadl.progress import progress_for_pyrogram
+from datetime import datetime, timedelta
 from megadl.forcesub import handle_force_subscribe
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -35,6 +36,11 @@ basedir = Config.DOWNLOAD_LOCATION
 # Telegram's Max File Size
 TG_MAX_FILE_SIZE = Config.TG_MAX_SIZE
 
+last_message_times = {}
+
+# Set a time limit of 10 minutes between consecutive URL messages
+TIME_LIMIT = 10  # minutes
+
 # Automatic Url Detection
 MEGA_REGEX = (r"^((?:https?:)?\/\/)"
               r"?((?:www)\.)"
@@ -48,13 +54,31 @@ def DownloadMegaLink(url, alreadylol, download_msg):
     except Exception as e:
         print(e)
 
+def url_time_limit(user_id):
+    if user_id in last_message_times:
+        time_elapsed = (datetime.now() - last_message_times[user_id]).total_seconds() / 60.0
+        return time_elapsed < TIME_LIMIT
+    return False
 
 @Client.on_message(filters.regex(MEGA_REGEX) & filters.private & filters.incoming & ~filters.edited)
 async def megadl(bot, message):
+    user_id = message.from_user.id
+
+    # Check if the message has a URL
+    if not any(entity.type == "url" for entity in message.entities):
+        return
+    if url_time_limit(user_id):
+        # Send a message to the user asking them to wait before sending another URL
+        time_left = int(TIME_LIMIT - (datetime.now() - last_message_times[user_id]).total_seconds() / 60.0)
+        await message.reply_text(f"Please wait {time_left} minutes before sending another URL.")
+        return
+    # Record the time the message was sent
+    last_message_times[user_id] = datetime.now()
     if Config.UPDATES_CHANNEL:
       fsub = await handle_force_subscribe(bot, message)
       if fsub == 400:
         return
+    
     url = message.text
     user_info = f'**User ID:** #id{message.from_user.id} \n**User Name:** [{message.from_user.first_name}](tg://user?id={message.from_user.id})'
     userpath = str(message.from_user.id)
